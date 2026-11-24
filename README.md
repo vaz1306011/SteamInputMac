@@ -43,6 +43,7 @@ make install
 （請填完整路徑 `/Users/<你>/.local/share/steamac-controller/launch.sh`；路徑不能有空格，
 Steam for Mac 也不支援 `VAR=值 %command%` 的寫法。）
 
+`launch.sh` 會順便補回 Steam 內嵌介面（overlay）的 dylib：SIP 會清掉 Steam 傳進來的 `DYLD_INSERT_LIBRARIES`。
 紀錄檔在 `~/Library/Logs/steaminput-fix.log`。只對沒開 hardened runtime 的遊戲有效（多數 Steam Mac 遊戲是 ad-hoc 簽章）。
 
 ## gcprobe
