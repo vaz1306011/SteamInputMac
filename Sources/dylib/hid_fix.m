@@ -14,6 +14,7 @@
 #import <IOKit/hid/IOHIDLib.h>
 #import <objc/runtime.h>
 #import <dlfcn.h>
+#import "rumble.h"
 
 void installSpawnInjection(void);
 extern BOOL isSteamClient;  // 在 Steam 用戶端裡只負責把修正帶給遊戲，不改 HID
@@ -62,11 +63,26 @@ static NSString *describeDevice(IOHIDDeviceRef device) {
 // Steam 給的是 "Microsoft GamePad-1"，沒有任何設定檔認得；改報成 Xbox 360 有線手柄的名稱。
 static CFStringRef const spoofedProductName = CFSTR("Xbox 360 Wired Controller");
 
+// 虛擬手柄沒有輸出 report，很多函式庫看到 MaxOutputReportSize=0 就不送震動；
+// 報成 360Controller 驅動的 8 bytes，讓遊戲照常送出，再由 SetReport 攔下來轉給手柄。
+static CFNumberRef spoofedOutputSize(void) {
+    static CFNumberRef value;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ int size = 8; value = CFNumberCreate(NULL, kCFNumberIntType, &size); });
+    return value;
+}
+
+static BOOL keyIs(CFStringRef key, const char *name) {
+    return key && CFStringCompare(key, (__bridge CFStringRef)@(name), 0) == kCFCompareEqualTo;
+}
+
 static CFTypeRef fix_IOHIDDeviceGetProperty(IOHIDDeviceRef device, CFStringRef key) {
-    if (!isSteamClient && key && CFStringCompare(key, CFSTR(kIOHIDProductKey), 0) == kCFCompareEqualTo
-        && isSteamVirtualGamepad(device)) {
+    if (!isSteamClient && keyIs(key, kIOHIDProductKey) && isSteamVirtualGamepad(device)) {
         fixLog(@"Product：Steam 虛擬手柄 → %@", spoofedProductName);
         return spoofedProductName;
+    }
+    if (!isSteamClient && keyIs(key, kIOHIDMaxOutputReportSizeKey) && isSteamVirtualGamepad(device)) {
+        return spoofedOutputSize();
     }
     CFTypeRef value = IOHIDDeviceGetProperty(device, key);
     if (traceEnabled) fixLog(@"GetProperty %@ %@ = %@", describeDevice(device), key, value);
@@ -83,17 +99,27 @@ static void fix_IOHIDManagerSetDeviceMatchingMultiple(IOHIDManagerRef manager, C
     IOHIDManagerSetDeviceMatchingMultiple(manager, multiple);
 }
 
-// 遊戲送給 Steam 虛擬手柄的輸出（震動等）：虛擬手柄沒有輸出 report，這裡先記錄下來
+// 遊戲送給 Steam 虛擬手柄的輸出（震動等）：虛擬手柄沒有輸出 report，攔下來轉給手柄
 static NSString *hexString(const uint8_t *bytes, CFIndex length) {
     NSMutableString *hex = [NSMutableString string];
     for (CFIndex i = 0; i < length; i++) [hex appendFormat:@"%02x", bytes[i]];
     return hex;
 }
 
+/// 解析 Xbox 360（360Controller 驅動格式）的震動 report：00 08 00 左 右 00 00 00。
+/// 是震動就轉給 Steam Controller 並回傳 YES。
+static BOOL forwardXbox360Rumble(IOHIDReportType type, const uint8_t *report, CFIndex length) {
+    if (type != kIOHIDReportTypeOutput || length < 5 || report[0] != 0x00 || report[1] != 0x08) return NO;
+    steamRumbleSet(report[3] * 257, report[4] * 257, "HID");
+    return YES;
+}
+
 static IOReturn fix_IOHIDDeviceSetReport(IOHIDDeviceRef device, IOHIDReportType type, CFIndex reportID,
                                          const uint8_t *report, CFIndex length) {
-    if (isSteamVirtualGamepad(device)) {
-        fixLog(@"SetReport 虛擬手柄 type=%d id=%ld %@", type, (long)reportID, hexString(report, length));
+    if (!isSteamClient && isSteamVirtualGamepad(device)) {
+        if (traceEnabled) fixLog(@"SetReport 虛擬手柄 type=%d id=%ld %@", type, (long)reportID, hexString(report, length));
+        if (forwardXbox360Rumble(type, report, length)) return kIOReturnSuccess;
+        fixLog(@"SetReport 虛擬手柄（未支援的格式）type=%d id=%ld %@", type, (long)reportID, hexString(report, length));
     }
     return IOHIDDeviceSetReport(device, type, reportID, report, length);
 }
@@ -101,8 +127,13 @@ static IOReturn fix_IOHIDDeviceSetReport(IOHIDDeviceRef device, IOHIDReportType 
 static IOReturn fix_IOHIDDeviceSetReportWithCallback(IOHIDDeviceRef device, IOHIDReportType type, CFIndex reportID,
                                                      const uint8_t *report, CFIndex length, CFTimeInterval timeout,
                                                      IOHIDReportCallback callback, void *context) {
-    if (isSteamVirtualGamepad(device)) {
-        fixLog(@"SetReportWithCallback 虛擬手柄 type=%d id=%ld %@", type, (long)reportID, hexString(report, length));
+    if (!isSteamClient && isSteamVirtualGamepad(device)) {
+        if (traceEnabled) fixLog(@"SetReportWithCallback 虛擬手柄 type=%d id=%ld %@", type, (long)reportID, hexString(report, length));
+        if (forwardXbox360Rumble(type, report, length)) {
+            if (callback) callback(context, kIOReturnSuccess, device, type, (uint32_t)reportID, (uint8_t *)report, length);
+            return kIOReturnSuccess;
+        }
+        fixLog(@"SetReportWithCallback 虛擬手柄（未支援的格式）type=%d id=%ld %@", type, (long)reportID, hexString(report, length));
     }
     return IOHIDDeviceSetReportWithCallback(device, type, reportID, report, length, timeout, callback, context);
 }
@@ -135,6 +166,58 @@ static BOOL hookedSupportsHIDDevice(id self, SEL _cmd, IOHIDDeviceRef device) {
     return originalSupportsHIDDevice(self, _cmd, device);
 }
 
+// MARK: - SDL 的忽略清單
+//
+// Steam 會把 SDL_GAMECONTROLLER_IGNORE_DEVICES 設成實體手柄清單（讓遊戲只讀虛擬手柄），
+// 裡面包含 045e:028e，而 Mac 上的虛擬手柄正好也是 045e:028e。
+// 新版 SDL 會先認出 Steam 虛擬手柄再套用清單；SDL 2.0.14 等舊版只認 Linux/Windows 的 28de:11ff，
+// 於是把虛擬手柄也忽略掉，遊戲完全讀不到手柄（例：Celeste）。
+// → 沒有實體 045e:028e 時，把它從清單拿掉。
+
+static BOOL hasPhysicalXbox360Controller(void) {
+    NSDictionary *matching = @{ @kIOProviderClassKey: @kIOHIDDeviceKey,
+                                @kIOHIDVendorIDKey: @0x045E, @kIOHIDProductIDKey: @0x028E };
+    io_iterator_t iterator;
+    if (IOServiceGetMatchingServices(MACH_PORT_NULL, (__bridge_retained CFDictionaryRef)matching, &iterator) != KERN_SUCCESS) {
+        return NO;
+    }
+    BOOL found = NO;
+    io_service_t service;
+    while ((service = IOIteratorNext(iterator))) {
+        CFTypeRef transport = IORegistryEntryCreateCFProperty(service, CFSTR(kIOHIDTransportKey), kCFAllocatorDefault, 0);
+        BOOL isVirtual = transport && CFGetTypeID(transport) == CFStringGetTypeID()
+            && CFStringCompare(transport, CFSTR("Virtual"), 0) == kCFCompareEqualTo;
+        if (transport) CFRelease(transport);
+        IOObjectRelease(service);
+        if (!isVirtual) found = YES;
+    }
+    IOObjectRelease(iterator);
+    return found;
+}
+
+static void allowSteamVirtualGamepadInSDL(void) {
+    const char *allow = getenv("SDL_GAMECONTROLLER_ALLOW_STEAM_VIRTUAL_GAMEPAD");
+    const char *ignored = getenv("SDL_GAMECONTROLLER_IGNORE_DEVICES");
+    if (!allow || strcmp(allow, "1") != 0 || !ignored) return;
+
+    NSMutableArray<NSString *> *kept = [NSMutableArray array];
+    BOOL removed = NO;
+    for (NSString *entry in [@(ignored) componentsSeparatedByString:@","]) {
+        if ([entry caseInsensitiveCompare:@"0x045e/0x028e"] == NSOrderedSame) {
+            removed = YES;
+        } else {
+            [kept addObject:entry];
+        }
+    }
+    if (!removed) return;
+    if (hasPhysicalXbox360Controller()) {
+        fixLog(@"有實體 045e:028e 手柄，不更動 SDL 忽略清單");
+        return;
+    }
+    setenv("SDL_GAMECONTROLLER_IGNORE_DEVICES", [kept componentsJoinedByString:@","].UTF8String, 1);
+    fixLog(@"SDL 忽略清單：拿掉 045e:028e（Steam 虛擬手柄）");
+}
+
 __attribute__((constructor))
 static void installHook(void) {
     NSString *logPath = [NSHomeDirectory() stringByAppendingPathComponent:@"Library/Logs/SteamInputMac.log"];
@@ -145,6 +228,8 @@ static void installHook(void) {
         || [[NSFileManager defaultManager] fileExistsAtPath:traceFlag];
     installSpawnInjection();
     if (isSteamClient) return;
+
+    allowSteamVirtualGamepadInSDL();
 
     // 遊戲的輸入外掛可能比我們晚載入 GameController，先主動載入以便 hook。
     dlopen("/System/Library/Frameworks/GameController.framework/GameController", RTLD_LAZY);
