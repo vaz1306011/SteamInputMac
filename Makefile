@@ -6,7 +6,7 @@ INSTALLER := build/SteamInputMac Installer.app
 SIGN_ID ?= $(shell security find-identity -v -p codesigning 2>/dev/null | awk -F'"' '/Apple Development/{print $$2; exit}')
 SIGN_ID := $(if $(SIGN_ID),$(SIGN_ID),-)
 
-FIX_SOURCES := Sources/dylib/hid_fix.m Sources/dylib/spawn_inject.m Sources/dylib/rumble.m
+FIX_SOURCES := Sources/dylib/hid_fix.m Sources/dylib/spawn_inject.m Sources/dylib/rumble.m Sources/dylib/mono_rumble.m
 INSTALLER_RESOURCES := Sources/steam-patch/patch.sh Sources/steam-patch/steam_osx Sources/dylib/launch.sh
 
 all: build/gcprobe build/rumbletest installer

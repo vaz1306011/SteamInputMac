@@ -40,6 +40,20 @@ Steam 手柄一定走 Steam Input（無法停用）。Steam 在 Mac 上會建立
 `libSteamInputMac.dylib` 注入遊戲後，把虛擬手柄的名稱改報成「Xbox 360 Wired Controller」，
 讓 `supportsHIDDevice` 對它回傳 NO，並在沒有實體 Xbox 360 手柄時把 045e:028e 從 SDL 忽略清單拿掉。不改系統，也不改遊戲檔案。
 
+### 震動傳不到手柄
+
+Steam 的虛擬手柄沒有輸出 report（`MaxOutputReportSize = 0`），遊戲的震動送不到手柄。
+dylib 直接對 Steam Controller 送震動（output report `0x80`，協定參考 SDL3 的
+`SDL_hidapi_steam_triton.c`，每 40ms 重送），並從三個地方接收遊戲的震動：
+
+| 來源 | 做法 | 適用 |
+| --- | --- | --- |
+| HID | 虛擬手柄改報 8 bytes 輸出，攔截送給它的 Xbox 360 震動 report（`00 08 00 左 右 …`） | 直接對 HID 送震動的遊戲 |
+| Unity Input System | 攔截 `NativeInputSystem::IOCTL` 的 `'RMBL'` 指令，原生層不支援時改送給手柄 | 用 Unity 新版 Input System 的遊戲（例：Silksong） |
+| InControl 舊式輸入 | Mono profiler 在 JIT 後把空的 `InputDevice.Vibrate` 換成 hook | InControl + Unity 舊式搖桿輸入的遊戲 |
+
+`make build/rumbletest && ./build/rumbletest` 可直接讓手柄震動，確認協定可用。
+
 ### 怎麼讓所有遊戲自動套用
 
 安裝時會把 Steam.app 完整備份到 `~/.local/share/steaminputmac/Steam.app.orig`，
