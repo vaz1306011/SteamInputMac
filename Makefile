@@ -2,6 +2,8 @@
 SWIFTC := xcrun swiftc
 CLANG  := xcrun clang
 INSTALLER := build/SteamInputMac Installer.app
+# 版本號，CI 由 tag 帶入；會寫進安裝程式的 Info.plist 與 Resources/VERSION
+VERSION ?= dev
 # 有 Apple Development 憑證就用它簽安裝程式，「App 管理」授權在重新編譯後才不會失效；否則 ad-hoc
 SIGN_ID ?= $(shell security find-identity -v -p codesigning 2>/dev/null | awk -F'"' '/Apple Development/{print $$2; exit}')
 SIGN_ID := $(if $(SIGN_ID),$(SIGN_ID),-)
@@ -39,12 +41,13 @@ installer: build/SteamInputMacInstaller build/libSteamInputMac.dylib Sources/ins
 	cp build/SteamInputMacInstaller "$(INSTALLER)/Contents/MacOS/"
 	cp Sources/installer/Info.plist "$(INSTALLER)/Contents/"
 	cp $(INSTALLER_RESOURCES) build/libSteamInputMac.dylib "$(INSTALLER)/Contents/Resources/"
+	echo "$(VERSION)" > "$(INSTALLER)/Contents/Resources/VERSION"
+	/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $(VERSION)" "$(INSTALLER)/Contents/Info.plist"
 	-cp /Applications/Steam.app/Contents/Resources/Steam.icns "$(INSTALLER)/Contents/Resources/AppIcon.icns"
 	codesign -f -s "$(SIGN_ID)" "$(INSTALLER)"
 	@echo "已產生 $(INSTALLER)（簽章：$(SIGN_ID)）"
 
-# 打包成 DMG（內含安裝程式與「應用程式」捷徑），VERSION 可由 CI 帶入 tag
-VERSION ?= dev
+# 打包成 DMG（內含安裝程式與「應用程式」捷徑）
 DMG := build/SteamInputMac-$(VERSION).dmg
 dmg: installer
 	rm -rf build/dmg "$(DMG)"

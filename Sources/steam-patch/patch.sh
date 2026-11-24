@@ -5,6 +5,7 @@
 #   patch.sh status     查看狀態
 # 這個腳本旁邊要有 steam_osx（wrapper）、libSteamInputMac.dylib、launch.sh。
 # STEAM_APP 可指定要修補的 Steam.app（預設 /Applications/Steam.app）。
+# SIM_VERSION 可指定這次安裝的版本號；沒給就讀腳本旁的 VERSION 檔。
 # 需要「系統設定 → 隱私權與安全性 → App 管理」授權給執行這個腳本的 app。
 set -euo pipefail
 
@@ -65,7 +66,9 @@ install)
     mkdir -p "$DATA_DIR"
     install_file "$SRC_DIR/libSteamInputMac.dylib" "$DATA_DIR/libSteamInputMac.dylib"
     install_file "$SRC_DIR/launch.sh" "$DATA_DIR/launch.sh"
-    echo "已安裝修正檔到 $DATA_DIR"
+    version="${SIM_VERSION:-$(cat "$SRC_DIR/VERSION" 2>/dev/null || true)}"
+    if [[ -n "$version" ]]; then echo "$version" > "$DATA_DIR/VERSION"; else rm -f "$DATA_DIR/VERSION"; fi
+    echo "已安裝修正檔 ${version:-（版本不明）} 到 $DATA_DIR"
 
     if is_patched; then
         install_file "$SRC_DIR/steam_osx" "$MACOS/steam_osx"
@@ -105,7 +108,11 @@ uninstall)
     ;;
 status)
     if is_patched; then echo "Steam.app：已修補"; else echo "Steam.app：原版"; fi
-    if [[ -f "$DATA_DIR/libSteamInputMac.dylib" ]]; then echo "修正檔：已安裝"; else echo "修正檔：未安裝"; fi
+    if [[ -f "$DATA_DIR/libSteamInputMac.dylib" ]]; then
+        echo "修正檔：已安裝（版本 $(cat "$DATA_DIR/VERSION" 2>/dev/null || echo 不明)）"
+    else
+        echo "修正檔：未安裝"
+    fi
     if [[ -x "$CLIENT" ]]; then echo "Steam 用戶端：已下載"; else echo "Steam 用戶端：尚未下載"; fi
     ;;
 *)
