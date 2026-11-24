@@ -6,17 +6,22 @@ INSTALLER := build/SteamInputMac Installer.app
 SIGN_ID ?= $(shell security find-identity -v -p codesigning 2>/dev/null | awk -F'"' '/Apple Development/{print $$2; exit}')
 SIGN_ID := $(if $(SIGN_ID),$(SIGN_ID),-)
 
-FIX_SOURCES := Sources/dylib/hid_fix.m Sources/dylib/spawn_inject.m
+FIX_SOURCES := Sources/dylib/hid_fix.m Sources/dylib/spawn_inject.m Sources/dylib/rumble.m
 INSTALLER_RESOURCES := Sources/steam-patch/patch.sh Sources/steam-patch/steam_osx Sources/dylib/launch.sh
 
-all: build/gcprobe installer
+all: build/gcprobe build/rumbletest installer
 
 build/gcprobe: Sources/gcprobe/main.swift
 	@mkdir -p build
 	$(SWIFTC) -O $< -o $@
 
+# 直接對手柄送震動，驗證震動協定
+build/rumbletest: Sources/rumbletest/main.swift
+	@mkdir -p build
+	$(SWIFTC) -O $< -o $@
+
 # 遊戲可能是 arm64 或 Rosetta 下的 x86_64，做 universal
-build/libSteamInputMac.dylib: $(FIX_SOURCES)
+build/libSteamInputMac.dylib: $(FIX_SOURCES) Sources/dylib/rumble.h
 	@mkdir -p build
 	$(CLANG) -arch arm64 -arch x86_64 -mmacosx-version-min=11.0 -fobjc-arc -dynamiclib -O2 \
 		-framework Foundation -framework AppKit -framework IOKit $(FIX_SOURCES) -o $@
