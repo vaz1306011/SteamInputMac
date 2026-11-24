@@ -83,12 +83,47 @@ static void fix_IOHIDManagerSetDeviceMatchingMultiple(IOHIDManagerRef manager, C
     IOHIDManagerSetDeviceMatchingMultiple(manager, multiple);
 }
 
+// 遊戲送給 Steam 虛擬手柄的輸出（震動等）：虛擬手柄沒有輸出 report，這裡先記錄下來
+static NSString *hexString(const uint8_t *bytes, CFIndex length) {
+    NSMutableString *hex = [NSMutableString string];
+    for (CFIndex i = 0; i < length; i++) [hex appendFormat:@"%02x", bytes[i]];
+    return hex;
+}
+
+static IOReturn fix_IOHIDDeviceSetReport(IOHIDDeviceRef device, IOHIDReportType type, CFIndex reportID,
+                                         const uint8_t *report, CFIndex length) {
+    if (isSteamVirtualGamepad(device)) {
+        fixLog(@"SetReport 虛擬手柄 type=%d id=%ld %@", type, (long)reportID, hexString(report, length));
+    }
+    return IOHIDDeviceSetReport(device, type, reportID, report, length);
+}
+
+static IOReturn fix_IOHIDDeviceSetReportWithCallback(IOHIDDeviceRef device, IOHIDReportType type, CFIndex reportID,
+                                                     const uint8_t *report, CFIndex length, CFTimeInterval timeout,
+                                                     IOHIDReportCallback callback, void *context) {
+    if (isSteamVirtualGamepad(device)) {
+        fixLog(@"SetReportWithCallback 虛擬手柄 type=%d id=%ld %@", type, (long)reportID, hexString(report, length));
+    }
+    return IOHIDDeviceSetReportWithCallback(device, type, reportID, report, length, timeout, callback, context);
+}
+
+static IOReturn fix_IOHIDDeviceSetValue(IOHIDDeviceRef device, IOHIDElementRef element, IOHIDValueRef value) {
+    if (isSteamVirtualGamepad(device)) {
+        fixLog(@"SetValue 虛擬手柄 usage=%x:%x value=%ld", IOHIDElementGetUsagePage(element),
+               IOHIDElementGetUsage(element), (long)IOHIDValueGetIntegerValue(value));
+    }
+    return IOHIDDeviceSetValue(device, element, value);
+}
+
 typedef struct { const void *replacement; const void *original; } Interpose;
 __attribute__((used, section("__DATA,__interpose")))
 static const Interpose interposers[] = {
     { (const void *)fix_IOHIDDeviceGetProperty, (const void *)IOHIDDeviceGetProperty },
     { (const void *)fix_IOHIDDeviceCopyMatchingElements, (const void *)IOHIDDeviceCopyMatchingElements },
     { (const void *)fix_IOHIDManagerSetDeviceMatchingMultiple, (const void *)IOHIDManagerSetDeviceMatchingMultiple },
+    { (const void *)fix_IOHIDDeviceSetReport, (const void *)IOHIDDeviceSetReport },
+    { (const void *)fix_IOHIDDeviceSetReportWithCallback, (const void *)IOHIDDeviceSetReportWithCallback },
+    { (const void *)fix_IOHIDDeviceSetValue, (const void *)IOHIDDeviceSetValue },
 };
 
 static BOOL hookedSupportsHIDDevice(id self, SEL _cmd, IOHIDDeviceRef device) {
@@ -104,7 +139,10 @@ __attribute__((constructor))
 static void installHook(void) {
     NSString *logPath = [NSHomeDirectory() stringByAppendingPathComponent:@"Library/Logs/SteamInputMac.log"];
     logFile = fopen(logPath.fileSystemRepresentation, "a");
-    traceEnabled = getenv("STEAMINPUTMAC_TRACE") != NULL;
+    // 環境變數或開關檔案都能開追蹤（從 Steam 開的遊戲不方便設環境變數）
+    NSString *traceFlag = [NSHomeDirectory() stringByAppendingPathComponent:@".local/share/steaminputmac/trace"];
+    traceEnabled = getenv("STEAMINPUTMAC_TRACE") != NULL
+        || [[NSFileManager defaultManager] fileExistsAtPath:traceFlag];
     installSpawnInjection();
     if (isSteamClient) return;
 
