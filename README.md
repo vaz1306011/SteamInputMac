@@ -48,7 +48,7 @@ dylib 直接對 Steam Controller 送震動（output report `0x80`，協定參考
 
 | 來源 | 做法 | 適用 |
 | --- | --- | --- |
-| HID | 虛擬手柄改報 8 bytes 輸出，攔截送給它的 Xbox 360 震動 report（`00 08 00 左 右 …`） | 直接對 HID 送震動的遊戲 |
+| HID | 虛擬手柄改報 8 bytes 輸出，攔截送給它的 Xbox 360 震動 report（`00 08 00 左 右 …`、hidapi 的 `08 00 左 右 …`、SDL 2.0.x 的 `00 04 左 右`） | 直接對 HID 送震動的遊戲、SDL 遊戲（例：Celeste） |
 | Unity Input System | 攔截 `NativeInputSystem::IOCTL` 的 `'RMBL'` 指令，原生層不支援時改送給手柄 | 用 Unity 新版 Input System 的遊戲（例：Silksong） |
 | InControl 舊式輸入 | Mono profiler 在 JIT 後把空的 `InputDevice.Vibrate` 換成 hook | InControl + Unity 舊式搖桿輸入的遊戲 |
 

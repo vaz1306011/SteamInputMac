@@ -107,11 +107,26 @@ static NSString *hexString(const uint8_t *bytes, CFIndex length) {
 }
 
 /// 解析 Xbox 360（360Controller 驅動格式）的震動 report：00 08 00 左 右 00 00 00。
-/// 是震動就轉給 Steam Controller 並回傳 YES。
+/// hidapi（SDL 內建）在 report ID 為 0 時會拿掉第一個 byte，送出 08 00 左 右 00 00 00。
+/// SDL 2.0.x 在 macOS 給 360Controller 驅動用的短格式：00 04 左 右（例：Celeste）。
+/// 是震動就轉給 Steam Controller 並回傳 YES；LED 指令（01 03 xx）等直接吞掉。
 static BOOL forwardXbox360Rumble(IOHIDReportType type, const uint8_t *report, CFIndex length) {
-    if (type != kIOHIDReportTypeOutput || length < 5 || report[0] != 0x00 || report[1] != 0x08) return NO;
-    steamRumbleSet(report[3] * 257, report[4] * 257, "HID");
-    return YES;
+    if (type != kIOHIDReportTypeOutput || !report) return NO;
+    if (length >= 5 && report[0] == 0x00 && report[1] == 0x08) {
+        steamRumbleSet(report[3] * 257, report[4] * 257, "HID");
+        return YES;
+    }
+    if (length >= 4 && report[0] == 0x08 && report[1] == 0x00) {
+        steamRumbleSet(report[2] * 257, report[3] * 257, "HID");
+        return YES;
+    }
+    if (length == 4 && report[0] == 0x00 && report[1] == 0x04) {
+        steamRumbleSet(report[2] * 257, report[3] * 257, "HID");
+        return YES;
+    }
+    // 360Controller 的 LED 指令：虛擬手柄沒有燈，回報成功即可
+    if (length == 3 && report[0] == 0x01 && report[1] == 0x03) return YES;
+    return NO;
 }
 
 static IOReturn fix_IOHIDDeviceSetReport(IOHIDDeviceRef device, IOHIDReportType type, CFIndex reportID,
