@@ -15,10 +15,13 @@
 #import <objc/runtime.h>
 #import <dlfcn.h>
 
+void installSpawnInjection(void);
+extern BOOL isSteamClient;  // 在 Steam 用戶端裡只負責把修正帶給遊戲，不改 HID
+
 static BOOL (*originalSupportsHIDDevice)(id, SEL, IOHIDDeviceRef);
 static FILE *logFile;
 
-static void fixLog(NSString *format, ...) {
+void fixLog(NSString *format, ...) {
     if (!logFile) return;
     va_list args;
     va_start(args, format);
@@ -60,7 +63,7 @@ static NSString *describeDevice(IOHIDDeviceRef device) {
 static CFStringRef const spoofedProductName = CFSTR("Xbox 360 Wired Controller");
 
 static CFTypeRef fix_IOHIDDeviceGetProperty(IOHIDDeviceRef device, CFStringRef key) {
-    if (key && CFStringCompare(key, CFSTR(kIOHIDProductKey), 0) == kCFCompareEqualTo
+    if (!isSteamClient && key && CFStringCompare(key, CFSTR(kIOHIDProductKey), 0) == kCFCompareEqualTo
         && isSteamVirtualGamepad(device)) {
         fixLog(@"Product：Steam 虛擬手柄 → %@", spoofedProductName);
         return spoofedProductName;
@@ -102,6 +105,8 @@ static void installHook(void) {
     NSString *logPath = [NSHomeDirectory() stringByAppendingPathComponent:@"Library/Logs/steaminput-fix.log"];
     logFile = fopen(logPath.fileSystemRepresentation, "a");
     traceEnabled = getenv("STEAMINPUT_FIX_TRACE") != NULL;
+    installSpawnInjection();
+    if (isSteamClient) return;
 
     // 遊戲的輸入外掛可能比我們晚載入 GameController，先主動載入以便 hook。
     dlopen("/System/Library/Frameworks/GameController.framework/GameController", RTLD_LAZY);

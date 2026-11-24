@@ -1,0 +1,27 @@
+#!/bin/bash
+# 取代 /Applications/Steam.app 的主程式（原本的 Valve 啟動器改名為 steam_osx.valve）。
+#
+# Valve 啟動器有 hardened runtime，會清掉 DYLD_* 變數，所以這裡模仿它，直接帶著 steaminput-fix
+# 執行 Steam.AppBundle 裡的 Steam 用戶端（沒有 hardened runtime）。之後 Steam 開的遊戲都會自動套用修正。
+# 其他情況（Steam 已在執行、用戶端還沒安裝、修正不見了）交回 Valve 啟動器處理。
+HERE="$(cd "$(dirname "$0")" && pwd)"
+VALVE_LAUNCHER="$HERE/steam_osx.valve"
+FIX="$HOME/.local/share/steamac-controller/libsteaminput-fix.dylib"
+CLIENT_DIR="$HOME/Library/Application Support/Steam/Steam.AppBundle/Steam/Contents/MacOS"
+CLIENT="$CLIENT_DIR/steam_osx"
+LOG="$HOME/Library/Logs/steaminput-fix.log"
+
+log() { echo "[Steam.app] $(date '+%F %T') $*" >> "$LOG"; }
+
+if pgrep -f "$CLIENT" >/dev/null || [[ ! -x "$CLIENT" || ! -f "$FIX" ]]; then
+    log "交給 Valve 啟動器（Steam 執行中或缺少檔案）"
+    exec "$VALVE_LAUNCHER" "$@"
+fi
+
+log "以修正模式啟動 Steam"
+cd "$CLIENT_DIR" || exec "$VALVE_LAUNCHER" "$@"
+export STEAM_CLIENT_CONFIG_FILE="$CLIENT_DIR/steam.cfg"
+export STEAM_APP_BUNDLE_PATH="$(cd "$HERE/../.." && pwd)"
+export LC_ALL="en_US.UTF-8"
+export DYLD_INSERT_LIBRARIES="$FIX"
+exec "$CLIENT" "$@"

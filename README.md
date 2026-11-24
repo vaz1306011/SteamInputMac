@@ -31,10 +31,28 @@ Steam 手柄一定走 Steam Input（無法停用）。Steam 在 Mac 上會建立
 並讓 `supportsHIDDevice` 對它回傳 NO。只影響加了啟動選項的遊戲，不改系統、不改遊戲檔案。
 
 ```bash
-make install
+make patch-steam     # 修補 /Applications/Steam.app，所有遊戲自動套用（建議）
+make unpatch-steam   # 從備份還原原版 Steam.app
 ```
 
-然後在 Steam → 遊戲右鍵 → 內容 → 一般 → 啟動選項填入：
+### 所有遊戲自動套用（修補 Steam.app）
+
+`make patch-steam` 會先把原版完整備份到 `~/.local/share/steamac-controller/Steam.app.orig`，
+再把 Steam.app 的主程式換成 wrapper（Valve 啟動器改名為 `steam_osx.valve`），最後以 ad-hoc 重新簽章。
+之後照常點 Steam 圖示開啟即可，不會多出其他 app 或背景程序。
+
+- Valve 啟動器有 hardened runtime 會清掉 `DYLD_*`，wrapper 改為直接 `exec` 沒有 hardened runtime
+  的 Steam 用戶端（`Steam.AppBundle/.../steam_osx`），並帶上 `libsteaminput-fix.dylib`。
+- 修正在 Steam 用戶端內只負責轉交：攔截 NSWorkspace 啟動遊戲，把 dylib 加進遊戲的
+  `DYLD_INSERT_LIBRARIES`（與 Steam 內嵌介面並存）；不改 Steam 自己的 HID。
+- Steam 已在執行、或用戶端尚未安裝時，wrapper 交回 Valve 啟動器處理。
+- 需要「系統設定 → 隱私權與安全性 → App 管理」授權給執行指令的 app。
+- 若重新安裝 Steam 或 Steam.app 被更新覆蓋，重新 `make patch-steam` 即可。
+- Steam 自我更新後重新啟動時，可能會回到一般模式；結束 Steam 再從圖示開一次就好。
+
+### 單一遊戲（啟動選項）
+
+在 Steam → 遊戲右鍵 → 內容 → 一般 → 啟動選項填入：
 
 ```
 ~/.local/share/steamac-controller/launch.sh %command%
