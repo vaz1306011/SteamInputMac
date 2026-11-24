@@ -161,6 +161,58 @@ static IOReturn fix_IOHIDDeviceSetValue(IOHIDDeviceRef device, IOHIDElementRef e
     return IOHIDDeviceSetValue(device, element, value);
 }
 
+// MARK: - 藏起 Steam 要遊戲忽略的實體手柄
+//
+// Steam 用 SDL_GAMECONTROLLER_IGNORE_DEVICES 告訴遊戲別讀實體手柄（改讀虛擬手柄）。
+// 舊版 SDL（例：Celeste 的 2.0.x）在 JoystickDeviceWasAddedCallback 忽略裝置時會呼叫 FreeDevice，
+// 但裝置還沒加進清單，FreeDevice 在清單裡找不到它就讀到 NULL 而崩潰——
+// 只要虛擬手柄已在清單中、又接著看到藍牙 Xbox 手柄等被忽略的實體手柄就會發生。
+// → 遊戲的 IOHIDManager 直接看不到這些手柄。（dylib 自己的震動輸出不經過 interpose，不受影響。）
+
+static NSSet<NSNumber *> *steamIgnoredDevices;   // (vendor << 16) | product
+
+static void loadSteamIgnoredDevices(void) {
+    const char *ignored = getenv("SDL_GAMECONTROLLER_IGNORE_DEVICES");
+    if (!ignored) return;
+    NSMutableSet *set = [NSMutableSet set];
+    for (NSString *entry in [@(ignored) componentsSeparatedByString:@","]) {
+        NSArray<NSString *> *parts = [entry componentsSeparatedByString:@"/"];
+        if (parts.count != 2) continue;
+        unsigned vendor = 0, product = 0;
+        if (![[NSScanner scannerWithString:parts[0]] scanHexInt:&vendor]
+            || ![[NSScanner scannerWithString:parts[1]] scanHexInt:&product]) continue;
+        [set addObject:@((vendor << 16) | product)];
+    }
+    steamIgnoredDevices = set;
+}
+
+static BOOL shouldHideFromGame(IOHIDDeviceRef device) {
+    if (isSteamClient || steamIgnoredDevices.count == 0 || isSteamVirtualGamepad(device)) return NO;
+    int key = (intProperty(device, CFSTR(kIOHIDVendorIDKey)) << 16) | intProperty(device, CFSTR(kIOHIDProductIDKey));
+    return [steamIgnoredDevices containsObject:@(key)];
+}
+
+typedef struct { IOHIDDeviceCallback callback; void *context; } MatchingCallback;
+
+static void filteredDeviceMatching(void *context, IOReturn result, void *sender, IOHIDDeviceRef device) {
+    MatchingCallback *original = context;
+    if (shouldHideFromGame(device)) {
+        fixLog(@"藏起 Steam 要遊戲忽略的實體手柄 %@", describeDevice(device));
+        return;
+    }
+    original->callback(original->context, result, sender, device);
+}
+
+static void fix_IOHIDManagerRegisterDeviceMatchingCallback(IOHIDManagerRef manager, IOHIDDeviceCallback callback, void *context) {
+    if (!callback || isSteamClient) {
+        IOHIDManagerRegisterDeviceMatchingCallback(manager, callback, context);
+        return;
+    }
+    MatchingCallback *original = malloc(sizeof(MatchingCallback));   // 與 manager 同生命週期，不釋放
+    *original = (MatchingCallback){ callback, context };
+    IOHIDManagerRegisterDeviceMatchingCallback(manager, filteredDeviceMatching, original);
+}
+
 typedef struct { const void *replacement; const void *original; } Interpose;
 __attribute__((used, section("__DATA,__interpose")))
 static const Interpose interposers[] = {
@@ -170,6 +222,7 @@ static const Interpose interposers[] = {
     { (const void *)fix_IOHIDDeviceSetReport, (const void *)IOHIDDeviceSetReport },
     { (const void *)fix_IOHIDDeviceSetReportWithCallback, (const void *)IOHIDDeviceSetReportWithCallback },
     { (const void *)fix_IOHIDDeviceSetValue, (const void *)IOHIDDeviceSetValue },
+    { (const void *)fix_IOHIDManagerRegisterDeviceMatchingCallback, (const void *)IOHIDManagerRegisterDeviceMatchingCallback },
 };
 
 static BOOL hookedSupportsHIDDevice(id self, SEL _cmd, IOHIDDeviceRef device) {
@@ -244,6 +297,7 @@ static void installHook(void) {
     installSpawnInjection();
     if (isSteamClient) return;
 
+    loadSteamIgnoredDevices();   // 要在拿掉 045e:028e 之前讀，虛擬手柄另外由 isSteamVirtualGamepad 排除
     allowSteamVirtualGamepadInSDL();
 
     // 遊戲的輸入外掛可能比我們晚載入 GameController，先主動載入以便 hook。

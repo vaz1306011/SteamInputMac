@@ -43,9 +43,11 @@ Steam 手柄一定走 Steam Input（無法停用）。Steam 在 Mac 上會建立
 - `GCController.supportsHIDDevice` 說它歸 GameController 管，但 GameController 不接虛擬的 Xbox 360 手柄。
 - Steam 給遊戲的 `SDL_GAMECONTROLLER_IGNORE_DEVICES` 含有 045e:028e。新版 SDL 會先認出虛擬手柄，
   但 SDL 2.0.14 等舊版不會，連虛擬手柄一起忽略（例：Celeste，以前要自己換新版 libSDL2 才能玩）。
+- 同一批舊版 SDL 在忽略裝置時有 bug：虛擬手柄已加入後，再看到被忽略的實體手柄（例：藍牙 Xbox 手柄）就會崩潰。
 
 `libSteamInputMac.dylib` 注入遊戲後，把虛擬手柄的名稱改報成「Xbox 360 Wired Controller」，
-讓 `supportsHIDDevice` 對它回傳 NO，並在沒有實體 Xbox 360 手柄時把 045e:028e 從 SDL 忽略清單拿掉。不改系統，也不改遊戲檔案。
+讓 `supportsHIDDevice` 對它回傳 NO，並在沒有實體 Xbox 360 手柄時把 045e:028e 從 SDL 忽略清單拿掉；
+忽略清單裡的實體手柄則直接不讓遊戲的 IOHIDManager 看到。不改系統，也不改遊戲檔案。
 
 ### 震動傳不到手柄
 
