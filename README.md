@@ -4,6 +4,9 @@
 
 ## 安裝
 
+從 [Releases](../../releases) 下載 `SteamInputMac-版本.dmg`，打開後把安裝程式拖到「應用程式」。
+安裝程式未經 Apple 公證，第一次開啟請在 Finder 按右鍵 →「打開」。
+
 1. 安裝 Steam，**先正常開一次並登入**（讓 Steam 下載用戶端），然後結束 Steam。
 2. 打開「SteamInputMac Installer.app」，選擇 Steam，按「安裝」。
 3. 第一次會提示需要權限：到「系統設定 → 隱私權與安全性 → App 管理」允許安裝程式，
@@ -17,10 +20,14 @@
 
 ```bash
 make installer   # 產生 build/SteamInputMac Installer.app
+make dmg         # 打包成 build/SteamInputMac-dev.dmg
 make install     # 指令列安裝（同安裝程式的「安裝」）
 make uninstall   # 指令列解除安裝
 make status
 ```
+
+發佈新版：推送 `v*` tag（例如 `git tag v1.0.0 && git push origin v1.0.0`），
+GitHub Actions 會自動打包 DMG 並建立 Release。
 
 紀錄檔：`~/Library/Logs/SteamInputMac.log`
 

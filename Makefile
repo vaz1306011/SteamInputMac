@@ -43,7 +43,19 @@ installer: build/SteamInputMacInstaller build/libSteamInputMac.dylib Sources/ins
 	codesign -f -s "$(SIGN_ID)" "$(INSTALLER)"
 	@echo "已產生 $(INSTALLER)（簽章：$(SIGN_ID)）"
 
-.PHONY: all installer run install uninstall status clean
+# 打包成 DMG（內含安裝程式與「應用程式」捷徑），VERSION 可由 CI 帶入 tag
+VERSION ?= dev
+DMG := build/SteamInputMac-$(VERSION).dmg
+dmg: installer
+	rm -rf build/dmg "$(DMG)"
+	mkdir -p build/dmg
+	cp -R "$(INSTALLER)" build/dmg/
+	ln -s /Applications build/dmg/Applications
+	hdiutil create -volname "SteamInputMac $(VERSION)" -srcfolder build/dmg -ov -format UDZO "$(DMG)"
+	rm -rf build/dmg
+	@echo "已產生 $(DMG)"
+
+.PHONY: all installer dmg run install uninstall status clean
 run: build/gcprobe
 	./build/gcprobe --input
 
