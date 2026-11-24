@@ -51,7 +51,8 @@ Steam 手柄一定走 Steam Input（無法停用）。Steam 在 Mac 上會建立
 
 Steam 的虛擬手柄沒有輸出 report（`MaxOutputReportSize = 0`），遊戲的震動送不到手柄。
 dylib 直接對 Steam Controller 送震動（output report `0x80`，協定參考 SDL3 的
-`SDL_hidapi_steam_triton.c`，每 40ms 重送），並從三個地方接收遊戲的震動：
+`SDL_hidapi_steam_triton.c`，每 40ms 重送）與藍牙 Xbox 手柄（output report `0x03`，協定參考 SDL 的
+`SDL_hidapi_xboxone.c`，持續時間上限 2.55 秒，每秒重送），並從三個地方接收遊戲的震動：
 
 | 來源 | 做法 | 適用 |
 | --- | --- | --- |
