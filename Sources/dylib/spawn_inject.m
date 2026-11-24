@@ -1,4 +1,4 @@
-// 在 Steam 用戶端（steam_osx）裡攔截啟動遊戲的呼叫，自動把 steaminput-fix 加進遊戲的
+// 在 Steam 用戶端（steam_osx）裡攔截啟動遊戲的呼叫，自動把 SteamInputMac 加進遊戲的
 // DYLD_INSERT_LIBRARIES（與 Steam 自己的內嵌介面 gameoverlayrenderer.dylib 並存）。
 // 這樣所有 Steam 遊戲都不用個別設啟動選項。
 #import <Foundation/Foundation.h>
@@ -36,7 +36,7 @@ static BOOL fixAvailable(void) {
     return fixDylibPath[0] && access(fixDylibPath, R_OK) == 0;
 }
 
-/// 回傳加上 steaminput-fix 的新 envp（呼叫端負責 free），不需要時回傳 NULL。
+/// 回傳加上 SteamInputMac 的新 envp（呼叫端負責 free），不需要時回傳 NULL。
 static char **envWithFix(const char *path, char *const envp[]) {
     if (!envp || !isGameLaunch(envp) || !fixAvailable()) return NULL;
 
@@ -57,7 +57,7 @@ static char **envWithFix(const char *path, char *const envp[]) {
         }
     }
     if (!found) asprintf(&result[count], "%s%s", kInsertKey, fixDylibPath);
-    fixLog(@"Steam 啟動遊戲：%s，已加入 steaminput-fix", path);
+    fixLog(@"Steam 啟動遊戲：%s，已加入 SteamInputMac", path);
     return result;
 }
 
@@ -100,7 +100,7 @@ static const Interpose spawnInterposers[] = {
 
 // Steam 開 .app 遊戲是透過 NSWorkspace（LaunchServices），環境變數放在 configuration 裡。
 
-/// 遊戲的環境變數補上 steaminput-fix；不是遊戲就回傳 nil。
+/// 遊戲的環境變數補上 SteamInputMac；不是遊戲就回傳 nil。
 static NSDictionary *gameEnvWithFix(NSDictionary *env, NSURL *url) {
     if (!(env[@"SteamGameId"] || env[@"SteamAppId"]) || !fixAvailable()) return nil;
     NSString *fix = @(fixDylibPath);
@@ -108,7 +108,7 @@ static NSDictionary *gameEnvWithFix(NSDictionary *env, NSURL *url) {
     if ([existing containsString:fix]) return nil;
     NSMutableDictionary *newEnv = [env mutableCopy];
     newEnv[@"DYLD_INSERT_LIBRARIES"] = existing.length ? [existing stringByAppendingFormat:@":%@", fix] : fix;
-    fixLog(@"Steam 啟動遊戲：%@，已加入 steaminput-fix", url.path);
+    fixLog(@"Steam 啟動遊戲：%@，已加入 SteamInputMac", url.path);
     return newEnv;
 }
 

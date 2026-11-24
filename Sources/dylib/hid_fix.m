@@ -1,4 +1,4 @@
-// steaminput-fix：注入遊戲的 dylib，讓遊戲讀得到 Steam Input 建立的虛擬 Xbox 360 手柄。
+// SteamInputMac：注入遊戲的 dylib，讓遊戲讀得到 Steam Input 建立的虛擬 Xbox 360 手柄。
 //
 // Steam 在 macOS 上用虛擬 HID 裝置 GamePad-1（045e:028e，Transport=Virtual）輸出手柄訊號，
 // 回報格式與 360Controller 驅動相同，但遊戲常常認不得它：
@@ -9,7 +9,7 @@
 // 2. GameController：+[GCController supportsHIDDevice:] 對它回傳 YES，用這個 API 分流的函式庫會跳過它，
 //    但 macOS 的 Xbox 360 personality 沒有 GCIOMatchVirtual，GameController 不會接手。→ 改回傳 NO。
 //
-// 設 STEAMINPUT_FIX_TRACE=1 可把遊戲對 IOHID 的呼叫記到 ~/Library/Logs/steaminput-fix.log。
+// 設 STEAMINPUTMAC_TRACE=1 可把遊戲對 IOHID 的呼叫記到 ~/Library/Logs/SteamInputMac.log。
 #import <Foundation/Foundation.h>
 #import <IOKit/hid/IOHIDLib.h>
 #import <objc/runtime.h>
@@ -49,7 +49,7 @@ static BOOL isSteamVirtualGamepad(IOHIDDeviceRef device) {
         && intProperty(device, CFSTR(kIOHIDProductIDKey)) == 0x028E;
 }
 
-// MARK: - 追蹤遊戲對 IOHID 的呼叫（設 STEAMINPUT_FIX_TRACE=1 開啟）
+// MARK: - 追蹤遊戲對 IOHID 的呼叫（設 STEAMINPUTMAC_TRACE=1 開啟）
 
 static BOOL traceEnabled;
 
@@ -102,9 +102,9 @@ static BOOL hookedSupportsHIDDevice(id self, SEL _cmd, IOHIDDeviceRef device) {
 
 __attribute__((constructor))
 static void installHook(void) {
-    NSString *logPath = [NSHomeDirectory() stringByAppendingPathComponent:@"Library/Logs/steaminput-fix.log"];
+    NSString *logPath = [NSHomeDirectory() stringByAppendingPathComponent:@"Library/Logs/SteamInputMac.log"];
     logFile = fopen(logPath.fileSystemRepresentation, "a");
-    traceEnabled = getenv("STEAMINPUT_FIX_TRACE") != NULL;
+    traceEnabled = getenv("STEAMINPUTMAC_TRACE") != NULL;
     installSpawnInjection();
     if (isSteamClient) return;
 

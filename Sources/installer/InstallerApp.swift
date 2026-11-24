@@ -1,4 +1,4 @@
-// Steam 手柄修正安裝程式：圖形介面安裝／修復／解除安裝 steamac-controller。
+// SteamInputMac Installer：圖形介面安裝／修復／解除安裝 SteamInputMac。
 // 實際動作交給 app 內附的 patch.sh，介面只負責偵測狀態與呼叫它。
 import AppKit
 import SwiftUI
@@ -19,13 +19,13 @@ struct SteamInstall: Identifiable, Hashable {
 
 enum Paths {
     static let home = FileManager.default.homeDirectoryForCurrentUser
-    static let dataDir = home.appendingPathComponent(".local/share/steamac-controller")
+    static let dataDir = home.appendingPathComponent(".local/share/steaminputmac")
     static let client = home.appendingPathComponent(
         "Library/Application Support/Steam/Steam.AppBundle/Steam/Contents/MacOS/steam_osx")
-    static let log = home.appendingPathComponent("Library/Logs/steaminput-fix.log")
+    static let log = home.appendingPathComponent("Library/Logs/SteamInputMac.log")
 
     static var fixInstalled: Bool {
-        FileManager.default.fileExists(atPath: dataDir.appendingPathComponent("libsteaminput-fix.dylib").path)
+        FileManager.default.fileExists(atPath: dataDir.appendingPathComponent("libSteamInputMac.dylib").path)
     }
     static var clientDownloaded: Bool { FileManager.default.isExecutableFile(atPath: client.path) }
 }
@@ -223,10 +223,15 @@ struct ContentView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
-            Text("Steam 手柄修正安裝程式")
-                .font(.system(size: 30, weight: .medium, design: .monospaced))
-                .frame(maxWidth: .infinity)
-                .padding(.top, 8)
+            VStack(spacing: 4) {
+                Text("SteamInputMac")
+                    .font(.system(size: 30, weight: .medium, design: .monospaced))
+                Text("Steam 手柄修正安裝程式")
+                    .font(.system(size: 14, design: .monospaced))
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.top, 8)
 
             Text("""
             讓 Steam Controller 在 Mac 的 Steam 遊戲裡可以操控：修正 Steam Input 的虛擬手柄，\
@@ -338,7 +343,7 @@ struct InstallerApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     var body: some Scene {
-        WindowGroup("Steam 手柄修正安裝程式") {
+        WindowGroup("SteamInputMac Installer") {
             ContentView()
         }
         .windowResizability(.contentMinSize)

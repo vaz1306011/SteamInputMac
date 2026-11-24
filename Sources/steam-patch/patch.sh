@@ -1,15 +1,15 @@
 #!/bin/bash
-# 安裝／解除安裝 steamac-controller，讓 Steam 開的所有遊戲自動套用 steaminput-fix。
+# 安裝／解除安裝 SteamInputMac，讓 Steam 開的所有遊戲自動套用 SteamInputMac。
 #   patch.sh install    安裝修正檔並修補 Steam.app（第一次會完整備份原版；已安裝則更新）
 #   patch.sh uninstall  從備份還原 Steam.app，並移除所有安裝的檔案
 #   patch.sh status     查看狀態
-# 這個腳本旁邊要有 steam_osx（wrapper）、libsteaminput-fix.dylib、launch.sh。
+# 這個腳本旁邊要有 steam_osx（wrapper）、libSteamInputMac.dylib、launch.sh。
 # STEAM_APP 可指定要修補的 Steam.app（預設 /Applications/Steam.app）。
 # 需要「系統設定 → 隱私權與安全性 → App 管理」授權給執行這個腳本的 app。
 set -euo pipefail
 
 STEAM_APP="${STEAM_APP:-/Applications/Steam.app}"
-DATA_DIR="$HOME/.local/share/steamac-controller"
+DATA_DIR="$HOME/.local/share/steaminputmac"
 BACKUP="$DATA_DIR/Steam.app.orig"
 SRC_DIR="$(cd "$(dirname "$0")" && pwd)"
 MACOS="$STEAM_APP/Contents/MacOS"
@@ -27,12 +27,12 @@ install_file() {
 }
 
 check_writable() {
-    if ! touch "$STEAM_APP/Contents/.steamac-test" 2>/dev/null; then
+    if ! touch "$STEAM_APP/Contents/.steaminputmac-test" 2>/dev/null; then
         echo "沒有權限修改 $STEAM_APP。" >&2
         echo "請到「系統設定 → 隱私權與安全性 → App 管理」允許這個 app，再試一次。" >&2
         exit 3
     fi
-    rm -f "$STEAM_APP/Contents/.steamac-test"
+    rm -f "$STEAM_APP/Contents/.steaminputmac-test"
 }
 
 resign() {
@@ -42,12 +42,28 @@ resign() {
     codesign -f -s - "$STEAM_APP" 2>/dev/null
 }
 
+# 舊版（steamac-controller）裝在別的路徑，搬過來，原版 Steam.app 備份才不會遺失
+migrate_old_install() {
+    local old="$HOME/.local/share/steamac-controller"
+    [[ -d "$old" ]] || return 0
+    if [[ -d "$DATA_DIR" ]]; then
+        [[ -d "$old/Steam.app.orig" && ! -d "$BACKUP" ]] && mv "$old/Steam.app.orig" "$BACKUP"
+        rm -rf "$old"
+    else
+        mkdir -p "$(dirname "$DATA_DIR")"
+        mv "$old" "$DATA_DIR"
+    fi
+    rm -f "$DATA_DIR/libsteaminput-fix.dylib"
+    echo "已將舊版安裝搬移到 $DATA_DIR"
+}
+migrate_old_install
+
 case "${1:-status}" in
 install)
     [[ -d "$STEAM_APP" ]] || { echo "找不到 $STEAM_APP，請先安裝 Steam。" >&2; exit 4; }
     check_writable
     mkdir -p "$DATA_DIR"
-    install_file "$SRC_DIR/libsteaminput-fix.dylib" "$DATA_DIR/libsteaminput-fix.dylib"
+    install_file "$SRC_DIR/libSteamInputMac.dylib" "$DATA_DIR/libSteamInputMac.dylib"
     install_file "$SRC_DIR/launch.sh" "$DATA_DIR/launch.sh"
     echo "已安裝修正檔到 $DATA_DIR"
 
@@ -89,7 +105,7 @@ uninstall)
     ;;
 status)
     if is_patched; then echo "Steam.app：已修補"; else echo "Steam.app：原版"; fi
-    if [[ -f "$DATA_DIR/libsteaminput-fix.dylib" ]]; then echo "修正檔：已安裝"; else echo "修正檔：未安裝"; fi
+    if [[ -f "$DATA_DIR/libSteamInputMac.dylib" ]]; then echo "修正檔：已安裝"; else echo "修正檔：未安裝"; fi
     if [[ -x "$CLIENT" ]]; then echo "Steam 用戶端：已下載"; else echo "Steam 用戶端：尚未下載"; fi
     ;;
 *)

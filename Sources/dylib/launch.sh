@@ -1,11 +1,11 @@
 #!/bin/bash
-# Steam 啟動選項用的 wrapper：在環境裡注入 steaminput-fix 後再啟動遊戲。
-# 用法（Steam 啟動選項）：~/.local/share/steamac-controller/launch.sh %command%
+# Steam 啟動選項用的 wrapper：在環境裡注入 SteamInputMac 後再啟動遊戲。
+# 用法（Steam 啟動選項）：~/.local/share/steaminputmac/launch.sh %command%
 #
 # DYLD_* 必須在腳本內 export：SIP 會把它從 /bin/bash 這類系統程式的環境中移除。
 # 也因為這樣，Steam 原本用來注入內嵌介面（overlay）的 DYLD_INSERT_LIBRARIES 會遺失，要自己補回。
 DIR="$(cd "$(dirname "$0")" && pwd)"
-LOG="$HOME/Library/Logs/steaminput-fix.log"
+LOG="$HOME/Library/Logs/SteamInputMac.log"
 STEAM_OVERLAY="$HOME/Library/Application Support/Steam/Steam.AppBundle/Steam/Contents/MacOS/gameoverlayrenderer.dylib"
 
 # %command% 可能是 .app，轉成裡面的執行檔，否則 DYLD 變數不會被帶進去
@@ -18,7 +18,7 @@ fi
 
 # 修正檔不在（已解除安裝）就照常啟動，不讓遊戲因找不到 dylib 而開不起來
 libs=""
-[[ -f "$DIR/libsteaminput-fix.dylib" ]] && libs="$DIR/libsteaminput-fix.dylib"
+[[ -f "$DIR/libSteamInputMac.dylib" ]] && libs="$DIR/libSteamInputMac.dylib"
 if [[ -n "$DYLD_INSERT_LIBRARIES" ]]; then
     libs="$DYLD_INSERT_LIBRARIES${libs:+:$libs}"
 elif [[ -f "$STEAM_OVERLAY" ]]; then

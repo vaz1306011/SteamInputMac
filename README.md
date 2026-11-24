@@ -1,11 +1,11 @@
-# steamac-controller
+# SteamInputMac
 
 讓新版 Steam Controller 在 macOS 上的 Steam 遊戲裡可以操控。
 
 ## 安裝
 
 1. 安裝 Steam，**先正常開一次並登入**（讓 Steam 下載用戶端），然後結束 Steam。
-2. 打開「Steam 手柄修正安裝程式.app」，選擇 Steam，按「安裝」。
+2. 打開「SteamInputMac Installer.app」，選擇 Steam，按「安裝」。
 3. 第一次會提示需要權限：到「系統設定 → 隱私權與安全性 → App 管理」允許安裝程式，
    重開安裝程式再按一次「安裝」。
 4. 照常點 Steam 圖示開 Steam、玩遊戲。Steam 若正在執行，可按安裝程式裡的「重新啟動 Steam」。
@@ -16,13 +16,13 @@
 自行編譯安裝程式（需要 Xcode）：
 
 ```bash
-make installer   # 產生 build/Steam 手柄修正安裝程式.app
+make installer   # 產生 build/SteamInputMac Installer.app
 make install     # 指令列安裝（同安裝程式的「安裝」）
 make uninstall   # 指令列解除安裝
 make status
 ```
 
-紀錄檔：`~/Library/Logs/steaminput-fix.log`
+紀錄檔：`~/Library/Logs/SteamInputMac.log`
 
 ## 原理
 
@@ -35,12 +35,12 @@ Steam 手柄一定走 Steam Input（無法停用）。Steam 在 Mac 上會建立
   （例：Hollow Knight: Silksong）。
 - `GCController.supportsHIDDevice` 說它歸 GameController 管，但 GameController 不接虛擬的 Xbox 360 手柄。
 
-`libsteaminput-fix.dylib` 注入遊戲後，把虛擬手柄的名稱改報成「Xbox 360 Wired Controller」，
+`libSteamInputMac.dylib` 注入遊戲後，把虛擬手柄的名稱改報成「Xbox 360 Wired Controller」，
 並讓 `supportsHIDDevice` 對它回傳 NO。不改系統，也不改遊戲檔案。
 
 ### 怎麼讓所有遊戲自動套用
 
-安裝時會把 Steam.app 完整備份到 `~/.local/share/steamac-controller/Steam.app.orig`，
+安裝時會把 Steam.app 完整備份到 `~/.local/share/steaminputmac/Steam.app.orig`，
 把主程式換成 wrapper（Valve 啟動器改名為 `steam_osx.valve`），再以 ad-hoc 重新簽章。
 
 - Valve 啟動器有 hardened runtime 會清掉 `DYLD_*`，wrapper 改為直接 `exec` 沒有 hardened runtime
@@ -58,7 +58,7 @@ Steam 手柄一定走 Steam Input（無法停用）。Steam 在 Mac 上會建立
 （完整路徑、不能有空格；Steam for Mac 不支援 `VAR=值 %command%` 的寫法）：
 
 ```
-/Users/<你>/.local/share/steamac-controller/launch.sh %command%
+/Users/<你>/.local/share/steaminputmac/launch.sh %command%
 ```
 
 `launch.sh` 會補回 Steam 內嵌介面的 dylib（SIP 會清掉 Steam 傳進來的 `DYLD_INSERT_LIBRARIES`）。
