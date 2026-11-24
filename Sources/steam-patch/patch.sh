@@ -1,9 +1,11 @@
 #!/bin/bash
-# 修補／還原 /Applications/Steam.app，讓 Steam 開的所有遊戲自動套用 steaminput-fix。
-#   patch.sh patch    修補（會先完整備份）
-#   patch.sh unpatch  從備份還原
-#   patch.sh status   查看狀態
-# 需要「系統設定 → 隱私權與安全性 → App 管理」授權給執行這個腳本的 app（終端機等）。
+# 安裝／解除安裝 steamac-controller，讓 Steam 開的所有遊戲自動套用 steaminput-fix。
+#   patch.sh install    安裝修正檔並修補 Steam.app（第一次會完整備份原版；已安裝則更新）
+#   patch.sh uninstall  從備份還原 Steam.app，並移除所有安裝的檔案
+#   patch.sh status     查看狀態
+# 這個腳本旁邊要有 steam_osx（wrapper）、libsteaminput-fix.dylib、launch.sh。
+# STEAM_APP 可指定要修補的 Steam.app（預設 /Applications/Steam.app）。
+# 需要「系統設定 → 隱私權與安全性 → App 管理」授權給執行這個腳本的 app。
 set -euo pipefail
 
 STEAM_APP="${STEAM_APP:-/Applications/Steam.app}"
@@ -11,50 +13,85 @@ DATA_DIR="$HOME/.local/share/steamac-controller"
 BACKUP="$DATA_DIR/Steam.app.orig"
 SRC_DIR="$(cd "$(dirname "$0")" && pwd)"
 MACOS="$STEAM_APP/Contents/MacOS"
+CLIENT="$HOME/Library/Application Support/Steam/Steam.AppBundle/Steam/Contents/MacOS/steam_osx"
 
 is_patched() { [[ -f "$MACOS/steam_osx.valve" ]]; }
-
 steam_running() { pgrep -x steam_osx >/dev/null; }
 
-case "${1:-status}" in
-patch)
-    if is_patched; then
-        # 已修補：只更新 wrapper（例如改版後重新安裝）
-        cp "$SRC_DIR/steam_osx" "$MACOS/steam_osx"
-        codesign -f -s - "$STEAM_APP" 2>/dev/null
-        echo "Steam.app 已是修補狀態，已更新 wrapper。"
-        exit 0
-    fi
+# 先複製到暫存檔再 rename：直接覆寫正在被 Steam／遊戲載入的 dylib 會讓它們當掉
+install_file() {
+    local src="$1" dest="$2"
+    cp "$src" "$dest.tmp.$$"
+    chmod +x "$dest.tmp.$$"
+    mv -f "$dest.tmp.$$" "$dest"
+}
+
+check_writable() {
     if ! touch "$STEAM_APP/Contents/.steamac-test" 2>/dev/null; then
         echo "沒有權限修改 $STEAM_APP。" >&2
-        echo "請到「系統設定 → 隱私權與安全性 → App 管理」允許執行這個指令的 app，再試一次。" >&2
-        exit 1
+        echo "請到「系統設定 → 隱私權與安全性 → App 管理」允許這個 app，再試一次。" >&2
+        exit 3
     fi
     rm -f "$STEAM_APP/Contents/.steamac-test"
-    mkdir -p "$DATA_DIR"
-    rm -rf "$BACKUP"
-    ditto "$STEAM_APP" "$BACKUP"
-    echo "已備份原版 Steam.app 到 $BACKUP"
-    mv "$MACOS/steam_osx" "$MACOS/steam_osx.valve"
-    cp "$SRC_DIR/steam_osx" "$MACOS/steam_osx"
-    chmod +x "$MACOS/steam_osx"
+}
+
+resign() {
     # 內容變了，Valve 的簽章失效；改用 ad-hoc 簽章（不含 hardened runtime）。
     # Valve 啟動器的簽章綁定原 bundle，也要重簽，否則整個 bundle 驗證不過。
-    codesign -f -s - "$MACOS/steam_osx.valve"
-    codesign -f -s - "$STEAM_APP"
-    echo "已修補 Steam.app。"
-    if steam_running; then echo "Steam 正在執行，結束後重開才會生效。"; fi
+    codesign -f -s - "$MACOS/steam_osx.valve" 2>/dev/null
+    codesign -f -s - "$STEAM_APP" 2>/dev/null
+}
+
+case "${1:-status}" in
+install)
+    [[ -d "$STEAM_APP" ]] || { echo "找不到 $STEAM_APP，請先安裝 Steam。" >&2; exit 4; }
+    check_writable
+    mkdir -p "$DATA_DIR"
+    install_file "$SRC_DIR/libsteaminput-fix.dylib" "$DATA_DIR/libsteaminput-fix.dylib"
+    install_file "$SRC_DIR/launch.sh" "$DATA_DIR/launch.sh"
+    echo "已安裝修正檔到 $DATA_DIR"
+
+    if is_patched; then
+        install_file "$SRC_DIR/steam_osx" "$MACOS/steam_osx"
+        resign
+        echo "Steam.app 已是修補狀態，已更新。"
+    else
+        rm -rf "$BACKUP"
+        ditto "$STEAM_APP" "$BACKUP"
+        echo "已備份原版 Steam.app 到 $BACKUP"
+        mv "$MACOS/steam_osx" "$MACOS/steam_osx.valve"
+        install_file "$SRC_DIR/steam_osx" "$MACOS/steam_osx"
+        resign
+        echo "已修補 Steam.app。"
+    fi
+    [[ -x "$CLIENT" ]] || echo "注意：Steam 還沒下載過用戶端，請先開一次 Steam 並登入，結束後再開才會生效。"
+    if steam_running; then echo "Steam 正在執行，重開 Steam 後才會生效。"; fi
     ;;
-unpatch)
-    if ! is_patched; then echo "Steam.app 沒有被修補。"; exit 0; fi
-    if [[ ! -d "$BACKUP" ]]; then echo "找不到備份 $BACKUP，無法還原。" >&2; exit 1; fi
-    rm -rf "$STEAM_APP"
-    ditto "$BACKUP" "$STEAM_APP"
-    echo "已從備份還原原版 Steam.app。"
+uninstall)
+    if is_patched; then
+        check_writable
+        if [[ -d "$BACKUP" ]]; then
+            rm -rf "$STEAM_APP"
+            ditto "$BACKUP" "$STEAM_APP"
+            echo "已從備份還原原版 Steam.app（含 Valve 簽章）。"
+        else
+            # 沒有備份：手動換回 Valve 啟動器，只能用 ad-hoc 簽章
+            mv -f "$MACOS/steam_osx.valve" "$MACOS/steam_osx"
+            codesign -f -s - "$STEAM_APP" 2>/dev/null
+            echo "找不到備份，已手動還原 Steam.app（簽章為 ad-hoc，重新安裝 Steam 可恢復 Valve 簽章）。"
+        fi
+    else
+        echo "Steam.app 沒有被修補。"
+    fi
+    rm -rf "$DATA_DIR"
+    echo "已移除 $DATA_DIR"
+    if steam_running; then echo "Steam 正在執行，重開 Steam 後才會完全停用修正。"; fi
     ;;
 status)
     if is_patched; then echo "Steam.app：已修補"; else echo "Steam.app：原版"; fi
+    if [[ -f "$DATA_DIR/libsteaminput-fix.dylib" ]]; then echo "修正檔：已安裝"; else echo "修正檔：未安裝"; fi
+    if [[ -x "$CLIENT" ]]; then echo "Steam 用戶端：已下載"; else echo "Steam 用戶端：尚未下載"; fi
     ;;
 *)
-    echo "用法：$0 patch|unpatch|status" >&2; exit 2 ;;
+    echo "用法：$0 install|uninstall|status" >&2; exit 2 ;;
 esac
