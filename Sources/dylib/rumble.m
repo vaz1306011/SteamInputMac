@@ -7,8 +7,13 @@
 //
 // 藍牙 Xbox 手柄（045e），協定參考 SDL src/joystick/hidapi/SDL_hidapi_xboxone.c：
 //   output report 0x03 = { u8 enable(0x0F); u8 左扳機, 右扳機, 左馬達, 右馬達（0–100）; u8 持續(10ms); u8 延遲; u8 重複 }
-//   持續時間最多 2.55 秒，所以震動期間每秒重送一次。
+//   持續時間設 0.5 秒、震動期間每 0.28 秒重送：停止指令在藍牙上掉了也只會多震一下。
+//
+// 藍牙的 SetReport 是同步的且慢（數 ms 到數十 ms），遊戲又常每幀改震動值；
+// 若每次改動都排一個送出工作，佇列會越積越多，停止指令被延後、舊的震動延遲播放。
+// 所以只記下最新的值，佇列裡最多一個待送工作。停止時再補送幾次 0，避免停止指令遺失。
 #import <Foundation/Foundation.h>
+#import <os/lock.h>
 #import <IOKit/hid/IOHIDLib.h>
 #import "rumble.h"
 
@@ -22,9 +27,17 @@ static NSMutableDictionary<NSValue *, NSNumber *> *outputDevices;   // 裝置 �
 static dispatch_source_t resendTimer;
 static uint16_t currentLeft, currentRight;
 static unsigned resendTick;
+static unsigned stopRepeats;   // 停止後還要補送幾次 0
+
+static os_unfair_lock pendingLock = OS_UNFAIR_LOCK_INIT;
+static uint16_t pendingLeft, pendingRight;
+static const char *pendingSource;
+static BOOL applyScheduled;
 
 static const uint64_t kResendIntervalMs = 40;
-static const unsigned kXboxResendTicks = 25;   // 40ms × 25 = 1 秒
+static const unsigned kXboxResendTicks = 7;    // 40ms × 7 = 280ms
+static const uint8_t kXboxDuration = 50;       // 單位 10ms = 500ms
+static const unsigned kStopRepeats = 3;
 
 static int intProperty(IOHIDDeviceRef device, CFStringRef key) {
     CFTypeRef value = IOHIDDeviceGetProperty(device, key);
@@ -72,11 +85,11 @@ static IOReturn sendSteam(IOHIDDeviceRef device, uint16_t left, uint16_t right) 
 
 static IOReturn sendXbox(IOHIDDeviceRef device, uint16_t left, uint16_t right) {
     uint8_t low = (left * 100 + 65534) / 65535, high = (right * 100 + 65534) / 65535;  // 無條件進位，微弱震動不會變 0
-    uint8_t report[9] = {0x03, 0x0F, 0, 0, low, high, (left || right) ? 0xFF : 0, 0, 0};
+    uint8_t report[9] = {0x03, 0x0F, 0, 0, low, high, (left || right) ? kXboxDuration : 0, 0, 0};
     return IOHIDDeviceSetReport(device, kIOHIDReportTypeOutput, 0x03, report, sizeof(report));
 }
 
-/// includeXbox：Xbox 手柄只在震動改變或每秒重送時送，避免塞爆藍牙
+/// includeXbox：Xbox 手柄只在震動改變或每 280ms 重送時送，避免塞爆藍牙
 static void sendRumble(uint16_t left, uint16_t right, BOOL includeXbox) {
     static IOReturn lastError = kIOReturnSuccess;
     [outputDevices enumerateKeysAndObjectsUsingBlock:^(NSValue *key, NSNumber *kind, BOOL *stop) {
@@ -115,22 +128,43 @@ static void setupOnce(void) {
         resendTimer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, rumbleQueue);
         dispatch_source_set_timer(resendTimer, DISPATCH_TIME_NOW, kResendIntervalMs * NSEC_PER_MSEC, 5 * NSEC_PER_MSEC);
         dispatch_source_set_event_handler(resendTimer, ^{
-            if (!(currentLeft || currentRight)) return;
-            sendRumble(currentLeft, currentRight, ++resendTick % kXboxResendTicks == 0);
+            if (currentLeft || currentRight) {
+                sendRumble(currentLeft, currentRight, ++resendTick % kXboxResendTicks == 0);
+            } else if (stopRepeats) {
+                stopRepeats--;
+                sendRumble(0, 0, YES);
+            }
         });
         dispatch_activate(resendTimer);
     });
 }
 
+/// 在 rumbleQueue 上套用最新的震動值（中間被蓋掉的值直接略過）
+static void applyPending(void) {
+    os_unfair_lock_lock(&pendingLock);
+    uint16_t left = pendingLeft, right = pendingRight;
+    const char *source = pendingSource;
+    applyScheduled = NO;
+    os_unfair_lock_unlock(&pendingLock);
+
+    if (left == currentLeft && right == currentRight) return;
+    BOOL wasOn = currentLeft || currentRight;
+    currentLeft = left;
+    currentRight = right;
+    resendTick = 0;
+    stopRepeats = (left || right) ? 0 : kStopRepeats;
+    sendRumble(left, right, YES);  // 立即送一次；之後由計時器重送，歸零時送 0 讓手柄馬上停
+    if (!wasOn || !(left || right)) fixLog(@"震動（%s）：左 %u 右 %u", source, left, right);
+}
+
 void steamRumbleSet(uint16_t left, uint16_t right, const char *source) {
     setupOnce();
-    dispatch_async(rumbleQueue, ^{
-        if (left == currentLeft && right == currentRight) return;
-        BOOL wasOn = currentLeft || currentRight;
-        currentLeft = left;
-        currentRight = right;
-        resendTick = 0;
-        sendRumble(left, right, YES);  // 立即送一次；之後由計時器重送，歸零時送 0 讓手柄馬上停
-        if (!wasOn || !(left || right)) fixLog(@"震動（%s）：左 %u 右 %u", source, left, right);
-    });
+    os_unfair_lock_lock(&pendingLock);
+    pendingLeft = left;
+    pendingRight = right;
+    pendingSource = source;
+    BOOL schedule = !applyScheduled;
+    applyScheduled = YES;
+    os_unfair_lock_unlock(&pendingLock);
+    if (schedule) dispatch_async(rumbleQueue, ^{ applyPending(); });
 }
