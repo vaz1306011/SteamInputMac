@@ -16,13 +16,15 @@ if [[ "$1" == *.app || "$1" == *.app/ ]]; then
     set -- "$app/Contents/MacOS/$exe" "$@"
 fi
 
-libs="$DIR/libsteaminput-fix.dylib"
+# 修正檔不在（已解除安裝）就照常啟動，不讓遊戲因找不到 dylib 而開不起來
+libs=""
+[[ -f "$DIR/libsteaminput-fix.dylib" ]] && libs="$DIR/libsteaminput-fix.dylib"
 if [[ -n "$DYLD_INSERT_LIBRARIES" ]]; then
-    libs="$DYLD_INSERT_LIBRARIES:$libs"
+    libs="$DYLD_INSERT_LIBRARIES${libs:+:$libs}"
 elif [[ -f "$STEAM_OVERLAY" ]]; then
-    libs="$STEAM_OVERLAY:$libs"
+    libs="$STEAM_OVERLAY${libs:+:$libs}"
 fi
-export DYLD_INSERT_LIBRARIES="$libs"
+[[ -n "$libs" ]] && export DYLD_INSERT_LIBRARIES="$libs"
 
 echo "[launch.sh] $(date '+%F %T') DYLD_INSERT_LIBRARIES=$DYLD_INSERT_LIBRARIES exec: $*" >> "$LOG"
 exec "$@"

@@ -31,9 +31,14 @@ static BOOL isGameLaunch(char *const envp[]) {
     return NO;
 }
 
+/// dylib 還在才注入：解除安裝後若 Steam 仍在修正模式執行，DYLD_INSERT_LIBRARIES 指向不存在的檔案會讓遊戲無法啟動。
+static BOOL fixAvailable(void) {
+    return fixDylibPath[0] && access(fixDylibPath, R_OK) == 0;
+}
+
 /// 回傳加上 steaminput-fix 的新 envp（呼叫端負責 free），不需要時回傳 NULL。
 static char **envWithFix(const char *path, char *const envp[]) {
-    if (!fixDylibPath[0] || !envp || !isGameLaunch(envp)) return NULL;
+    if (!envp || !isGameLaunch(envp) || !fixAvailable()) return NULL;
 
     size_t count = 0;
     while (envp[count]) count++;
@@ -97,7 +102,7 @@ static const Interpose spawnInterposers[] = {
 
 /// 遊戲的環境變數補上 steaminput-fix；不是遊戲就回傳 nil。
 static NSDictionary *gameEnvWithFix(NSDictionary *env, NSURL *url) {
-    if (!fixDylibPath[0] || !(env[@"SteamGameId"] || env[@"SteamAppId"])) return nil;
+    if (!(env[@"SteamGameId"] || env[@"SteamAppId"]) || !fixAvailable()) return nil;
     NSString *fix = @(fixDylibPath);
     NSString *existing = env[@"DYLD_INSERT_LIBRARIES"];
     if ([existing containsString:fix]) return nil;
